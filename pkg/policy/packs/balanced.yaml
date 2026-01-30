@@ -1,0 +1,426 @@
+# NinjaShield Balanced Policy Pack
+# Good security with developer productivity
+
+id: balanced
+name: Balanced Policy
+version: "1.0.0"
+description: Balanced policy that auto-approves common safe developer commands while requiring approval for risky operations.
+
+default_action:
+  decision: ASK
+  reason: Command requires approval
+  reason_code: DEFAULT_ASK
+
+rules:
+  # ============================================================
+  # BLOCKED COMMANDS (Priority 100+) - Never allowed
+  # ============================================================
+
+  - id: block-pipe-to-shell
+    name: Block pipe to shell
+    description: Prevents remote code execution via curl/wget piped to shell
+    priority: 100
+    risk_category: exfiltration
+    risk_score: 100
+    conditions:
+      - type: pipe_to_shell
+    action:
+      decision: DENY
+      reason: Remote code execution pattern detected
+      reason_code: REMOTE_CODE_EXEC
+      context: Piping downloaded content to a shell interpreter is a common attack vector
+
+  - id: block-rm-rf-root
+    name: Block rm -rf /
+    description: Prevents catastrophic filesystem deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+/$"
+    action:
+      decision: DENY
+      reason: Catastrophic filesystem deletion blocked
+      reason_code: CATASTROPHIC_DELETE
+
+  - id: block-rm-rf-home
+    name: Block rm -rf ~ or $HOME
+    description: Prevents home directory deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+(~|\\$HOME)/?$"
+    action:
+      decision: DENY
+      reason: Home directory deletion blocked
+      reason_code: HOME_DELETE
+
+  - id: block-dd-devices
+    name: Block dd to raw devices
+    description: Prevents disk destruction via dd
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "dd\\s+.*of=/dev/(sd|hd|nvme|disk)"
+    action:
+      decision: DENY
+      reason: Raw device write blocked
+      reason_code: RAW_DEVICE_WRITE
+
+  - id: block-mkfs
+    name: Block filesystem creation
+    description: Prevents accidental filesystem formatting
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_prefix
+        pattern: mkfs,mkfs.ext4,mkfs.xfs,mkfs.btrfs,mkfs.ntfs
+    action:
+      decision: DENY
+      reason: Filesystem format command blocked
+      reason_code: FILESYSTEM_FORMAT
+
+  # ============================================================
+  # AUTO-APPROVED COMMANDS (Priority 10-30) - Safe operations
+  # ============================================================
+
+  # --- Basic shell commands ---
+  - id: allow-basic-shell
+    name: Allow basic shell commands
+    description: Common safe shell commands
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: ls,pwd,echo,which,whereis,type,command,date,cal,whoami,id,groups,env,printenv,hostname,uname
+    action:
+      decision: ALLOW
+      reason: Safe read-only command
+
+  # --- File reading ---
+  - id: allow-file-read
+    name: Allow file reading
+    description: Safe file reading commands
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: cat,head,tail,less,more,wc,sort,uniq,tr,cut,diff,cmp,file,stat
+      - type: path_pattern
+        pattern: "*.env*"
+        negate: true
+      - type: path_pattern
+        pattern: "*/.ssh/*"
+        negate: true
+    action:
+      decision: ALLOW
+      reason: Safe file read
+
+  # --- Git read operations ---
+  - id: allow-git-read
+    name: Allow git read operations
+    description: Git commands that only read repository state
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^git\\s+(status|diff|log|show|branch|remote|tag|describe|rev-parse|ls-files|ls-tree|blame|shortlog|reflog)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe git read operation
+
+  - id: allow-git-fetch
+    name: Allow git fetch
+    description: Git fetch only downloads, doesn't modify working tree
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^git\\s+fetch($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe git operation
+
+  # --- Build and test commands ---
+  - id: allow-test-runners
+    name: Allow test runners
+    description: Common test commands without install
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(npm\\s+test|npm\\s+run\\s+test|yarn\\s+test|pnpm\\s+test|pytest|python\\s+-m\\s+pytest|go\\s+test|cargo\\s+test|make\\s+test|jest|mocha|vitest)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe test command
+
+  - id: allow-lint
+    name: Allow linters
+    description: Code linting commands
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(npm\\s+run\\s+lint|yarn\\s+lint|pnpm\\s+lint|eslint|prettier|black|flake8|pylint|rubocop|golangci-lint|cargo\\s+clippy)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe lint command
+
+  - id: allow-build
+    name: Allow build commands
+    description: Common build commands
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(npm\\s+run\\s+build|yarn\\s+build|pnpm\\s+build|go\\s+build|cargo\\s+build|make(?!\\s+install)|gradle\\s+build|mvn\\s+compile|tsc)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe build command
+
+  # --- Directory navigation and search ---
+  - id: allow-find-grep
+    name: Allow find and grep
+    description: File search commands (without -exec or -delete)
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: find,grep,rg,ag,fd,locate
+      - type: has_flag
+        pattern: "-exec"
+        negate: true
+      - type: has_flag
+        pattern: "-delete"
+        negate: true
+    action:
+      decision: ALLOW
+      reason: Safe search command
+
+  - id: allow-tree
+    name: Allow tree
+    description: Directory tree display
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: tree,exa,eza
+    action:
+      decision: ALLOW
+      reason: Safe directory listing
+
+  # --- Documentation ---
+  - id: allow-man-help
+    name: Allow man/help
+    description: Documentation commands
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: man,info,help
+    action:
+      decision: ALLOW
+      reason: Documentation lookup
+
+  # ============================================================
+  # REQUIRE APPROVAL (Priority 40-60) - Risky operations
+  # ============================================================
+
+  # --- Git write operations ---
+  - id: ask-git-write
+    name: Git write operations
+    description: Git commands that modify repository
+    priority: 40
+    conditions:
+      - type: command_regex
+        pattern: "^git\\s+(add|commit|push|pull|merge|rebase|reset|checkout|restore|stash|cherry-pick|revert)($|\\s)"
+    action:
+      decision: ASK
+      reason: Git write operation requires approval
+      reason_code: GIT_WRITE
+
+  - id: ask-git-clean
+    name: Git clean
+    description: Git clean can delete untracked files
+    priority: 50
+    risk_category: destructive
+    risk_score: 60
+    conditions:
+      - type: command_regex
+        pattern: "^git\\s+clean"
+    action:
+      decision: ASK
+      reason: Git clean can delete files
+      reason_code: GIT_CLEAN
+      rewrite_to: "git clean -n"
+      rewrite_note: Run with -n (dry run) first to see what would be deleted
+
+  # --- Package installation ---
+  - id: ask-npm-install
+    name: NPM/Yarn/PNPM install
+    description: Node package installation
+    priority: 50
+    risk_category: install
+    risk_score: 50
+    conditions:
+      - type: command_regex
+        pattern: "^(npm|yarn|pnpm)\\s+(install|add|i)($|\\s)"
+    action:
+      decision: ASK
+      reason: Package installation requires approval
+      reason_code: NPM_INSTALL
+
+  - id: ask-pip-install
+    name: Pip install
+    description: Python package installation
+    priority: 50
+    risk_category: install
+    risk_score: 50
+    conditions:
+      - type: command_regex
+        pattern: "^pip3?\\s+install"
+    action:
+      decision: ASK
+      reason: Package installation requires approval
+      reason_code: PIP_INSTALL
+
+  - id: ask-brew-install
+    name: Brew install
+    description: Homebrew package installation
+    priority: 50
+    risk_category: install
+    risk_score: 50
+    conditions:
+      - type: command_regex
+        pattern: "^brew\\s+(install|upgrade)"
+    action:
+      decision: ASK
+      reason: Package installation requires approval
+      reason_code: BREW_INSTALL
+
+  - id: ask-apt-install
+    name: Apt install
+    description: System package installation
+    priority: 55
+    risk_category: install
+    risk_score: 60
+    conditions:
+      - type: command_regex
+        pattern: "^(apt|apt-get|yum|dnf|pacman)\\s+(install|upgrade|update)"
+    action:
+      decision: ASK
+      reason: System package operation requires approval
+      reason_code: SYSTEM_PACKAGE
+
+  # --- Destructive operations ---
+  - id: ask-rm
+    name: File deletion
+    description: File and directory removal
+    priority: 50
+    risk_category: destructive
+    risk_score: 60
+    conditions:
+      - type: command_prefix
+        pattern: rm,rmdir,unlink
+    action:
+      decision: ASK
+      reason: File deletion requires approval
+      reason_code: FILE_DELETE
+
+  - id: ask-mv
+    name: File move
+    description: File move/rename
+    priority: 40
+    risk_category: destructive
+    risk_score: 40
+    conditions:
+      - type: command_prefix
+        pattern: mv
+    action:
+      decision: ASK
+      reason: File move requires approval
+      reason_code: FILE_MOVE
+
+  # --- Network operations ---
+  - id: ask-curl-wget
+    name: HTTP requests
+    description: Network download commands
+    priority: 45
+    risk_category: network
+    risk_score: 40
+    conditions:
+      - type: command_prefix
+        pattern: curl,wget,http,https
+    action:
+      decision: ASK
+      reason: Network request requires approval
+      reason_code: NETWORK_REQUEST
+
+  - id: ask-ssh-scp
+    name: SSH/SCP
+    description: Remote shell and copy
+    priority: 50
+    risk_category: network
+    risk_score: 50
+    conditions:
+      - type: command_prefix
+        pattern: ssh,scp,rsync,sftp
+    action:
+      decision: ASK
+      reason: Remote access requires approval
+      reason_code: REMOTE_ACCESS
+
+  # --- Sensitive file access ---
+  - id: ask-env-files
+    name: Environment file access
+    description: Access to .env and credential files
+    priority: 55
+    risk_category: sensitive_read
+    risk_score: 70
+    conditions:
+      - type: path_pattern
+        pattern: "*.env*"
+    action:
+      decision: ASK
+      reason: Sensitive file access requires approval
+      reason_code: ENV_FILE_ACCESS
+
+  - id: ask-ssh-keys
+    name: SSH key access
+    description: Access to SSH keys
+    priority: 55
+    risk_category: sensitive_read
+    risk_score: 80
+    conditions:
+      - type: path_pattern
+        pattern: "*/.ssh/*"
+    action:
+      decision: ASK
+      reason: SSH key access requires approval
+      reason_code: SSH_KEY_ACCESS
+
+  # --- Privilege escalation ---
+  - id: ask-sudo
+    name: Sudo commands
+    description: Elevated privilege execution
+    priority: 60
+    risk_category: privileged
+    risk_score: 80
+    conditions:
+      - type: command_prefix
+        pattern: sudo,su,doas,pkexec
+    action:
+      decision: ASK
+      reason: Elevated privileges require approval
+      reason_code: SUDO
+
+  # --- Docker ---
+  - id: ask-docker
+    name: Docker commands
+    description: Container operations
+    priority: 45
+    risk_category: privileged
+    risk_score: 50
+    conditions:
+      - type: command_prefix
+        pattern: docker,podman
+    action:
+      decision: ASK
+      reason: Container operation requires approval
+      reason_code: DOCKER

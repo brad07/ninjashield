@@ -1,0 +1,458 @@
+# NinjaShield Developer-Friendly Policy Pack
+# Maximum productivity with essential safety guardrails
+
+id: developer-friendly
+name: Developer-Friendly Policy
+version: "1.0.0"
+description: Productivity-focused policy that auto-approves most development commands while blocking clearly dangerous operations.
+
+default_action:
+  decision: LOG_ONLY
+  reason: Command logged under developer-friendly policy
+  reason_code: DEV_FRIENDLY_DEFAULT
+
+rules:
+  # ============================================================
+  # BLOCKED COMMANDS (Priority 100+) - Never allowed
+  # ============================================================
+
+  - id: block-pipe-to-shell
+    name: Block pipe to shell
+    description: Prevents remote code execution via curl/wget piped to shell
+    priority: 100
+    risk_category: exfiltration
+    risk_score: 100
+    conditions:
+      - type: pipe_to_shell
+    action:
+      decision: DENY
+      reason: Remote code execution pattern detected
+      reason_code: REMOTE_CODE_EXEC
+      context: Piping downloaded content to a shell interpreter is a common attack vector. Download the file first and inspect it.
+
+  - id: block-rm-rf-root
+    name: Block rm -rf /
+    description: Prevents catastrophic filesystem deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+/$"
+    action:
+      decision: DENY
+      reason: Catastrophic filesystem deletion blocked
+      reason_code: CATASTROPHIC_DELETE
+
+  - id: block-rm-rf-home
+    name: Block rm -rf ~ or $HOME
+    description: Prevents home directory deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+(~|\\$HOME)/?$"
+    action:
+      decision: DENY
+      reason: Home directory deletion blocked
+      reason_code: HOME_DELETE
+
+  - id: block-rm-rf-system
+    name: Block rm -rf system directories
+    description: Prevents system directory deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+/(usr|bin|sbin|etc|var|boot|lib|lib64|opt|root|sys|proc)/?$"
+    action:
+      decision: DENY
+      reason: System directory deletion blocked
+      reason_code: SYSTEM_DELETE
+
+  - id: block-dd-devices
+    name: Block dd to raw devices
+    description: Prevents disk destruction via dd
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "dd\\s+.*of=/dev/(sd|hd|nvme|disk)"
+    action:
+      decision: DENY
+      reason: Raw device write blocked
+      reason_code: RAW_DEVICE_WRITE
+
+  - id: block-mkfs
+    name: Block filesystem creation
+    description: Prevents accidental filesystem formatting
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_prefix
+        pattern: mkfs,mkfs.ext4,mkfs.xfs,mkfs.btrfs,mkfs.ntfs
+    action:
+      decision: DENY
+      reason: Filesystem format command blocked
+      reason_code: FILESYSTEM_FORMAT
+
+  - id: block-fork-bomb
+    name: Block fork bomb patterns
+    description: Prevents fork bomb attacks
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: ":\\(\\)\\{\\s*:\\|:&\\s*\\};:"
+    action:
+      decision: DENY
+      reason: Fork bomb pattern blocked
+      reason_code: FORK_BOMB
+
+  # ============================================================
+  # AUTO-APPROVED COMMANDS (Priority 10-30) - Most dev commands
+  # ============================================================
+
+  # --- All basic shell commands ---
+  - id: allow-shell-commands
+    name: Allow shell commands
+    description: Common shell commands
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: ls,pwd,echo,which,whereis,type,command,date,cal,whoami,id,groups,env,printenv,hostname,uname,clear,history,alias
+    action:
+      decision: ALLOW
+      reason: Safe shell command
+
+  # --- File operations (non-destructive) ---
+  - id: allow-file-read
+    name: Allow file reading
+    description: File reading and viewing commands
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: cat,head,tail,less,more,wc,sort,uniq,tr,cut,diff,cmp,file,stat,touch,mkdir,cp
+    action:
+      decision: ALLOW
+      reason: Safe file operation
+
+  # --- Search commands ---
+  - id: allow-search
+    name: Allow search commands
+    description: File and content search
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: find,grep,rg,ag,fd,locate,tree,exa,eza,fzf
+    action:
+      decision: ALLOW
+      reason: Safe search command
+
+  # --- All git commands ---
+  - id: allow-git
+    name: Allow all git commands
+    description: All git version control operations
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: git
+    action:
+      decision: ALLOW
+      reason: Git operation allowed
+
+  # --- Package managers (read) ---
+  - id: allow-package-read
+    name: Allow package manager read ops
+    description: Package listing and info commands
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(npm|yarn|pnpm)\\s+(list|ls|info|show|outdated|audit|why|view)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe package query
+
+  # --- Build, test, lint ---
+  - id: allow-npm-scripts
+    name: Allow npm/yarn/pnpm scripts
+    description: Package manager script execution
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(npm|yarn|pnpm)\\s+(test|run|start|build|dev|serve|lint|format|check|typecheck)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Safe development command
+
+  - id: allow-python-dev
+    name: Allow Python development
+    description: Python execution and tools
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: python,python3,pytest,mypy,black,flake8,pylint,isort,ruff,uvicorn,gunicorn,flask,django
+    action:
+      decision: ALLOW
+      reason: Python development command
+
+  - id: allow-go-dev
+    name: Allow Go development
+    description: Go build and tools
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: go
+    action:
+      decision: ALLOW
+      reason: Go development command
+
+  - id: allow-rust-dev
+    name: Allow Rust development
+    description: Cargo and Rust tools
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: cargo,rustc,rustup
+    action:
+      decision: ALLOW
+      reason: Rust development command
+
+  - id: allow-node-dev
+    name: Allow Node.js development
+    description: Node.js execution
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: node,npx,tsx,ts-node,nodemon
+    action:
+      decision: ALLOW
+      reason: Node.js development command
+
+  - id: allow-build-tools
+    name: Allow build tools
+    description: Common build systems
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: make,cmake,gradle,mvn,maven,ant,ninja,meson
+    action:
+      decision: ALLOW
+      reason: Build tool command
+
+  # --- Editors and tools ---
+  - id: allow-editors
+    name: Allow editors
+    description: Text editors and IDEs
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: vim,nvim,nano,emacs,code,subl,atom
+    action:
+      decision: ALLOW
+      reason: Editor command
+
+  # --- Documentation ---
+  - id: allow-docs
+    name: Allow documentation
+    description: Help and manual commands
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: man,info,help,tldr
+    action:
+      decision: ALLOW
+      reason: Documentation command
+
+  # --- Process management ---
+  - id: allow-process-read
+    name: Allow process viewing
+    description: Process listing commands
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: ps,top,htop,btop,pgrep,lsof
+    action:
+      decision: ALLOW
+      reason: Process viewing command
+
+  # --- Network utilities (read) ---
+  - id: allow-network-read
+    name: Allow network inspection
+    description: Network status commands
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: ping,netstat,ss,ifconfig,ip,dig,nslookup,host,traceroute
+    action:
+      decision: ALLOW
+      reason: Network inspection command
+
+  # --- Docker read commands ---
+  - id: allow-docker-read
+    name: Allow Docker read commands
+    description: Docker status and listing
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^docker\\s+(ps|images|logs|inspect|stats|top|version|info)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Docker read operation
+
+  # --- Cloud CLI read ---
+  - id: allow-cloud-read
+    name: Allow cloud CLI read
+    description: Cloud provider read commands
+    priority: 20
+    conditions:
+      - type: command_regex
+        pattern: "^(aws|gcloud|az)\\s+.*(list|describe|get|show|ls)($|\\s)"
+    action:
+      decision: ALLOW
+      reason: Cloud CLI read operation
+
+  # ============================================================
+  # REQUIRE APPROVAL (Priority 40-60) - Some risky operations
+  # ============================================================
+
+  # --- Package installation ---
+  - id: ask-npm-install
+    name: NPM/Yarn/PNPM install
+    description: Node package installation
+    priority: 50
+    risk_category: install
+    risk_score: 40
+    conditions:
+      - type: command_regex
+        pattern: "^(npm|yarn|pnpm)\\s+(install|add|i|ci)($|\\s)"
+    action:
+      decision: ASK
+      reason: Package installation requires approval
+      reason_code: NPM_INSTALL
+
+  - id: ask-pip-install
+    name: Pip install
+    description: Python package installation
+    priority: 50
+    risk_category: install
+    risk_score: 40
+    conditions:
+      - type: command_regex
+        pattern: "^pip3?\\s+install"
+    action:
+      decision: ASK
+      reason: Package installation requires approval
+      reason_code: PIP_INSTALL
+
+  - id: ask-system-install
+    name: System package install
+    description: OS-level package installation
+    priority: 55
+    risk_category: install
+    risk_score: 50
+    conditions:
+      - type: command_regex
+        pattern: "^(brew|apt|apt-get|yum|dnf|pacman|choco)\\s+(install|upgrade)"
+    action:
+      decision: ASK
+      reason: System package installation requires approval
+      reason_code: SYSTEM_INSTALL
+
+  # --- Sudo ---
+  - id: ask-sudo
+    name: Sudo commands
+    description: Elevated privilege execution
+    priority: 60
+    risk_category: privileged
+    risk_score: 70
+    conditions:
+      - type: command_prefix
+        pattern: sudo,su,doas,pkexec
+    action:
+      decision: ASK
+      reason: Elevated privileges require approval
+      reason_code: SUDO
+
+  # --- Wide-scope deletions ---
+  - id: ask-rm-recursive
+    name: Recursive deletion
+    description: rm -r or rm -rf commands
+    priority: 55
+    risk_category: destructive
+    risk_score: 60
+    conditions:
+      - type: command_prefix
+        pattern: rm
+      - type: has_flag
+        pattern: "-r"
+    action:
+      decision: ASK
+      reason: Recursive deletion requires approval
+      reason_code: RM_RECURSIVE
+
+  - id: ask-find-delete
+    name: Find with delete
+    description: find -delete or find -exec rm
+    priority: 55
+    risk_category: destructive
+    risk_score: 65
+    conditions:
+      - type: command_prefix
+        pattern: find
+      - type: command_regex
+        pattern: "(-delete|-exec.*rm)"
+    action:
+      decision: ASK
+      reason: Bulk deletion requires approval
+      reason_code: FIND_DELETE
+
+  # --- Sensitive credentials ---
+  - id: ask-ssh-keys
+    name: SSH key access
+    description: Access to SSH private keys
+    priority: 55
+    risk_category: sensitive_read
+    risk_score: 70
+    conditions:
+      - type: path_regex
+        pattern: "\\.ssh/(id_|.*_key$)"
+    action:
+      decision: ASK
+      reason: SSH private key access requires approval
+      reason_code: SSH_KEY_ACCESS
+
+  # --- Docker write ---
+  - id: ask-docker-write
+    name: Docker write operations
+    description: Docker run, build, push
+    priority: 45
+    risk_category: privileged
+    risk_score: 45
+    conditions:
+      - type: command_regex
+        pattern: "^docker\\s+(run|build|push|pull|exec|rm|rmi|kill|stop|start|restart)($|\\s)"
+    action:
+      decision: ASK
+      reason: Docker write operation requires approval
+      reason_code: DOCKER_WRITE
+
+  # --- Cloud CLI write ---
+  - id: ask-cloud-write
+    name: Cloud CLI write operations
+    description: Cloud provider modification commands
+    priority: 50
+    risk_category: network
+    risk_score: 55
+    conditions:
+      - type: command_regex
+        pattern: "^(aws|gcloud|az)\\s+.*(create|delete|update|put|rm|upload|deploy)($|\\s)"
+    action:
+      decision: ASK
+      reason: Cloud write operation requires approval
+      reason_code: CLOUD_WRITE

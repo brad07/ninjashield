@@ -1,0 +1,263 @@
+# NinjaShield Conservative Policy Pack
+# Maximum security - requires approval for most operations
+
+id: conservative
+name: Conservative Policy
+version: "1.0.0"
+description: Maximum security policy that requires approval for most operations. Only the safest read-only commands are auto-approved.
+
+default_action:
+  decision: ASK
+  reason: Command requires approval under conservative policy
+  reason_code: CONSERVATIVE_DEFAULT
+
+rules:
+  # ============================================================
+  # BLOCKED COMMANDS (Priority 100+) - Never allowed
+  # ============================================================
+
+  - id: block-pipe-to-shell
+    name: Block pipe to shell
+    description: Prevents remote code execution via curl/wget piped to shell
+    priority: 100
+    risk_category: exfiltration
+    risk_score: 100
+    conditions:
+      - type: pipe_to_shell
+    action:
+      decision: DENY
+      reason: Remote code execution pattern detected
+      reason_code: REMOTE_CODE_EXEC
+      context: Piping downloaded content to a shell interpreter is a common attack vector
+
+  - id: block-rm-rf-root
+    name: Block rm -rf /
+    description: Prevents catastrophic filesystem deletion
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r).*\\s+/"
+    action:
+      decision: DENY
+      reason: Catastrophic filesystem deletion blocked
+      reason_code: CATASTROPHIC_DELETE
+
+  - id: block-dd-devices
+    name: Block dd to raw devices
+    description: Prevents disk destruction via dd
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_regex
+        pattern: "dd\\s+.*of=/dev/(sd|hd|nvme|disk)"
+    action:
+      decision: DENY
+      reason: Raw device write blocked
+      reason_code: RAW_DEVICE_WRITE
+
+  - id: block-mkfs
+    name: Block filesystem creation
+    description: Prevents accidental filesystem formatting
+    priority: 100
+    risk_category: destructive
+    risk_score: 100
+    conditions:
+      - type: command_prefix
+        pattern: mkfs,mkfs.ext4,mkfs.xfs,mkfs.btrfs,mkfs.ntfs
+    action:
+      decision: DENY
+      reason: Filesystem format command blocked
+      reason_code: FILESYSTEM_FORMAT
+
+  - id: block-chmod-777
+    name: Block chmod 777
+    description: Prevents overly permissive file permissions
+    priority: 100
+    risk_category: privileged
+    risk_score: 80
+    conditions:
+      - type: command_regex
+        pattern: "chmod\\s+777"
+    action:
+      decision: DENY
+      reason: Overly permissive chmod blocked
+      reason_code: INSECURE_PERMISSIONS
+
+  # ============================================================
+  # AUTO-APPROVED COMMANDS (Priority 10-20) - Safe read-only
+  # ============================================================
+
+  - id: allow-ls
+    name: Allow ls
+    description: Safe directory listing
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: ls
+      - type: has_flag
+        pattern: "-r"
+        negate: true
+    action:
+      decision: ALLOW
+      reason: Safe read-only command
+
+  - id: allow-pwd
+    name: Allow pwd
+    description: Print working directory
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: pwd
+    action:
+      decision: ALLOW
+      reason: Safe read-only command
+
+  - id: allow-echo
+    name: Allow echo
+    description: Safe echo command
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: echo
+    action:
+      decision: ALLOW
+      reason: Safe output command
+
+  - id: allow-which
+    name: Allow which/whereis/type
+    description: Safe command location lookup
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: which,whereis,type,command
+    action:
+      decision: ALLOW
+      reason: Safe lookup command
+
+  - id: allow-date
+    name: Allow date/cal
+    description: Safe date/time commands
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: date,cal
+    action:
+      decision: ALLOW
+      reason: Safe read-only command
+
+  - id: allow-whoami
+    name: Allow identity commands
+    description: Safe identity lookup
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: whoami,id,groups
+    action:
+      decision: ALLOW
+      reason: Safe identity command
+
+  - id: allow-cat-safe
+    name: Allow cat for safe files
+    description: Allow reading non-sensitive files
+    priority: 15
+    conditions:
+      - type: command_prefix
+        pattern: cat,head,tail,less,more
+      - type: path_pattern
+        pattern: "*.env*"
+        negate: true
+      - type: path_pattern
+        pattern: "*/.ssh/*"
+        negate: true
+      - type: path_pattern
+        pattern: "*/credentials*"
+        negate: true
+    action:
+      decision: ALLOW
+      reason: Safe file read
+
+  - id: allow-wc
+    name: Allow wc/sort/uniq
+    description: Safe text processing
+    priority: 10
+    conditions:
+      - type: command_prefix
+        pattern: wc,sort,uniq,tr,cut,head,tail
+    action:
+      decision: ALLOW
+      reason: Safe text processing
+
+  # ============================================================
+  # REQUIRE APPROVAL - Everything else
+  # ============================================================
+
+  - id: ask-git-read
+    name: Git read operations
+    description: Git status, diff, log require approval
+    priority: 20
+    conditions:
+      - type: command_prefix
+        pattern: git
+    action:
+      decision: ASK
+      reason: Git operations require approval in conservative mode
+      reason_code: GIT_OPERATION
+
+  - id: ask-network
+    name: Network commands
+    description: All network operations require approval
+    priority: 50
+    risk_category: network
+    risk_score: 60
+    conditions:
+      - type: command_prefix
+        pattern: curl,wget,http,https,ssh,scp,rsync,ftp,sftp,nc,netcat,telnet
+    action:
+      decision: ASK
+      reason: Network operation requires approval
+      reason_code: NETWORK_ACCESS
+
+  - id: ask-install
+    name: Package installation
+    description: All package installations require approval
+    priority: 50
+    risk_category: install
+    risk_score: 50
+    conditions:
+      - type: command_prefix
+        pattern: npm,yarn,pnpm,pip,pip3,gem,cargo,go,brew,apt,apt-get,yum,dnf,pacman,choco
+    action:
+      decision: ASK
+      reason: Package operation requires approval
+      reason_code: PACKAGE_INSTALL
+
+  - id: ask-destructive
+    name: Destructive commands
+    description: File deletion/modification requires approval
+    priority: 50
+    risk_category: destructive
+    risk_score: 70
+    conditions:
+      - type: command_prefix
+        pattern: rm,rmdir,mv,unlink
+    action:
+      decision: ASK
+      reason: Destructive operation requires approval
+      reason_code: DESTRUCTIVE_OP
+
+  - id: ask-privileged
+    name: Privileged commands
+    description: Elevated privilege commands require approval
+    priority: 60
+    risk_category: privileged
+    risk_score: 80
+    conditions:
+      - type: command_prefix
+        pattern: sudo,su,doas,pkexec
+    action:
+      decision: ASK
+      reason: Privileged operation requires approval
+      reason_code: PRIVILEGED_OP
