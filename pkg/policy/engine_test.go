@@ -1,11 +1,36 @@
 package policy_test
 
 import (
+	"context"
 	"testing"
 
+	"github.com/brad07/ninjashield/pkg/localllm"
 	"github.com/brad07/ninjashield/pkg/policy"
 	"github.com/brad07/ninjashield/pkg/policy/packs"
 )
+
+// mockUnavailableLLMProvider is a mock LLM provider that simulates being unavailable
+type mockUnavailableLLMProvider struct{}
+
+func (m *mockUnavailableLLMProvider) Name() string {
+	return "mock-unavailable"
+}
+
+func (m *mockUnavailableLLMProvider) IsAvailable(ctx context.Context) bool {
+	return false // Always unavailable
+}
+
+func (m *mockUnavailableLLMProvider) AssessCommand(ctx context.Context, summary localllm.CommandSummary) (*localllm.RiskAssessment, error) {
+	return nil, nil
+}
+
+func (m *mockUnavailableLLMProvider) AssessContent(ctx context.Context, summary localllm.ContentSummary) (*localllm.RiskAssessment, error) {
+	return nil, nil
+}
+
+func (m *mockUnavailableLLMProvider) Generate(ctx context.Context, prompt string) (string, error) {
+	return "", nil
+}
 
 func TestNewEngine(t *testing.T) {
 	pol, err := packs.Load(packs.Balanced)
@@ -408,5 +433,32 @@ func TestEngine_MultipleMatchedRules(t *testing.T) {
 	// Command should be risky (ASK or DENY)
 	if result.Decision == policy.DecisionAllow || result.Decision == policy.DecisionLogOnly {
 		t.Errorf("Expected risky command to require approval, got %v", result.Decision)
+	}
+}
+
+func TestEngine_LLMUnavailable_FailsClosed(t *testing.T) {
+	pol, _ := packs.Load(packs.Balanced)
+	engine := policy.NewEngine(pol)
+
+	// Set an unavailable mock LLM provider
+	engine.SetLLMProvider(&mockUnavailableLLMProvider{})
+
+	// Even a safe command should be denied when LLM is enabled but unavailable
+	result := engine.EvaluateCommand("ls -la")
+
+	if result.Decision != policy.DecisionDeny {
+		t.Errorf("Expected DENY when LLM is unavailable, got %v", result.Decision)
+	}
+
+	// Should have the llm_not_running reason code
+	hasReasonCode := false
+	for _, code := range result.ReasonCodes {
+		if code == "llm_not_running" {
+			hasReasonCode = true
+			break
+		}
+	}
+	if !hasReasonCode {
+		t.Errorf("Expected llm_not_running reason code, got %v", result.ReasonCodes)
 	}
 }

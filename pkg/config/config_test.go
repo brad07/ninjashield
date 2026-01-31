@@ -27,8 +27,8 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Scanners.Commands {
 		t.Error("expected commands scanner enabled by default")
 	}
-	if cfg.Ollama.Enabled {
-		t.Error("expected Ollama disabled by default")
+	if cfg.LLM.Enabled {
+		t.Error("expected LLM disabled by default")
 	}
 }
 
@@ -93,34 +93,51 @@ func TestConfigValidation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "ollama enabled without endpoint",
+			name: "llm enabled without endpoint",
 			modify: func(c *Config) {
-				c.Ollama.Enabled = true
-				c.Ollama.Endpoint = ""
+				c.LLM.Enabled = true
+				c.LLM.Endpoint = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "ollama enabled without model",
+			name: "llm enabled without model",
 			modify: func(c *Config) {
-				c.Ollama.Enabled = true
-				c.Ollama.Model = ""
+				c.LLM.Enabled = true
+				c.LLM.Model = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "ollama invalid mode",
+			name: "llm invalid mode",
 			modify: func(c *Config) {
-				c.Ollama.Enabled = true
-				c.Ollama.Mode = "invalid"
+				c.LLM.Enabled = true
+				c.LLM.Mode = "invalid"
 			},
 			wantErr: true,
 		},
 		{
-			name: "ollama valid strict mode",
+			name: "llm valid strict mode",
 			modify: func(c *Config) {
-				c.Ollama.Enabled = true
-				c.Ollama.Mode = "strict"
+				c.LLM.Enabled = true
+				c.LLM.Mode = "strict"
+			},
+			wantErr: false,
+		},
+		{
+			name: "llm invalid provider",
+			modify: func(c *Config) {
+				c.LLM.Enabled = true
+				c.LLM.Provider = "invalid"
+			},
+			wantErr: true,
+		},
+		{
+			name: "llm valid lmstudio provider",
+			modify: func(c *Config) {
+				c.LLM.Enabled = true
+				c.LLM.Provider = "lmstudio"
+				c.LLM.Endpoint = "http://localhost:1234"
 			},
 			wantErr: false,
 		},
@@ -205,8 +222,9 @@ logging:
   path: "/var/log/ninjashield/audit.db"
   max_size_mb: 50
   max_age_days: 30
-ollama:
+llm:
   enabled: false
+  provider: "ollama"
 `
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {

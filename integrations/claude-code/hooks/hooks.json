@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r \".tool_input.command // empty\"); [ -z \"$CMD\" ] && echo \"{\\\"permissionDecision\\\": \\\"allow\\\"}\" && exit 0; RESP=$(curl -sf --connect-timeout 2 -X POST http://localhost:7575/v1/commands/evaluate -H \"Content-Type: application/json\" -d \"$(echo \"$INPUT\" | jq -c \"{command: .tool_input.command, cwd: .cwd, tool: \\\"claude_code\\\", user: \\\"$USER\\\"}\")\") || { echo \"{\\\"permissionDecision\\\": \\\"deny\\\", \\\"message\\\": \\\"NinjaShield daemon not running\\\"}\"; exit 0; }; DEC=$(echo \"$RESP\" | jq -r .decision); case \"$DEC\" in ALLOW) echo \"{\\\"permissionDecision\\\": \\\"allow\\\"}\";; DENY) echo \"{\\\"permissionDecision\\\": \\\"deny\\\", \\\"message\\\": \\\"$(echo \"$RESP\" | jq -r .context)\\\"}\";; *) echo \"{\\\"permissionDecision\\\": \\\"ask\\\", \\\"message\\\": \\\"$(echo \"$RESP\" | jq -r .context)\\\"}\";; esac'"
+          }
+        ]
+      }
+    ]
+  }
+}

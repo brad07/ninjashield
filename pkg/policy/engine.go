@@ -1,9 +1,13 @@
 package policy
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/brad07/ninjashield/pkg/localllm"
 	"github.com/brad07/ninjashield/pkg/scanners"
 )
 
@@ -14,11 +18,14 @@ type Engine struct {
 	secretsScanner *scanners.SecretsScanner
 	piiScanner     *scanners.PIIScanner
 	commandScanner *scanners.CommandScanner
+	llmProvider    localllm.Provider
 
 	// Configuration
 	enableSecrets  bool
 	enablePII      bool
 	enableCommands bool
+	enableLLM      bool
+	llmTimeout     time.Duration
 }
 
 // EngineConfig holds configuration for the policy engine.
@@ -26,6 +33,9 @@ type EngineConfig struct {
 	EnableSecrets  bool
 	EnablePII      bool
 	EnableCommands bool
+	EnableLLM      bool
+	LLMProvider    localllm.Provider
+	LLMTimeout     time.Duration
 }
 
 // DefaultEngineConfig returns the default engine configuration.
@@ -34,6 +44,8 @@ func DefaultEngineConfig() EngineConfig {
 		EnableSecrets:  true,
 		EnablePII:      true,
 		EnableCommands: true,
+		EnableLLM:      false,
+		LLMTimeout:     10 * time.Second,
 	}
 }
 
@@ -44,16 +56,34 @@ func NewEngine(policy *Policy) *Engine {
 
 // NewEngineWithConfig creates a new policy engine with custom configuration.
 func NewEngineWithConfig(policy *Policy, config EngineConfig) *Engine {
+	timeout := config.LLMTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
 	return &Engine{
 		policy:         policy,
 		matcher:        NewMatcher(),
 		secretsScanner: scanners.NewSecretsScanner(),
 		piiScanner:     scanners.NewPIIScanner(),
 		commandScanner: scanners.NewCommandScanner(),
+		llmProvider:    config.LLMProvider,
 		enableSecrets:  config.EnableSecrets,
 		enablePII:      config.EnablePII,
 		enableCommands: config.EnableCommands,
+		enableLLM:      config.EnableLLM,
+		llmTimeout:     timeout,
 	}
+}
+
+// SetLLMProvider sets the local LLM provider for AI-based scoring.
+func (e *Engine) SetLLMProvider(provider localllm.Provider) {
+	e.llmProvider = provider
+	e.enableLLM = provider != nil
+}
+
+// GetLLMProvider returns the current LLM provider.
+func (e *Engine) GetLLMProvider() localllm.Provider {
+	return e.llmProvider
 }
 
 // SetPolicy updates the policy used by the engine.
@@ -104,7 +134,96 @@ func (e *Engine) Evaluate(input *EvaluationInput) *EvaluationResult {
 	// Add scanner findings to context if any critical ones found
 	e.addScannerContext(allFindings, result)
 
+	// If LLM is enabled, run AI-based scoring for:
+	// - ALLOW decisions (might upgrade to ASK or DENY)
+	// - ASK decisions with risk score >= 50 (might upgrade to DENY)
+	if e.enableLLM && e.llmProvider != nil {
+		shouldRunAI := result.Decision == DecisionAllow ||
+			(result.Decision == DecisionAsk && result.RiskScore >= 50)
+		if shouldRunAI {
+			e.applyLLMScoring(input, result)
+		}
+	}
+
 	return result
+}
+
+// applyLLMScoring uses AI to assess command risk.
+func (e *Engine) applyLLMScoring(input *EvaluationInput, result *EvaluationResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), e.llmTimeout)
+	defer cancel()
+
+	// Check if LLM provider is available
+	if !e.llmProvider.IsAvailable(ctx) {
+		// Fail closed: if LLM is enabled but not running, deny the command
+		result.Decision = DecisionDeny
+		result.Reasons = []string{"AI scoring is enabled but LLM provider is not running"}
+		result.Context = "Start the LLM provider (e.g., ollama serve) to enable AI-based command scoring"
+		addUniqueString(&result.ReasonCodes, "llm_not_running")
+		return
+	}
+
+	summary := localllm.CommandSummary{
+		Command:       input.Command,
+		Cwd:           input.Cwd,
+		User:          input.User,
+		Tool:          input.Tool,
+		DetectedRisks: result.RiskCategories,
+		InitialScore:  result.RiskScore,
+	}
+
+	assessment, err := e.llmProvider.AssessCommand(ctx, summary)
+	if err != nil {
+		// Fail closed: if LLM is enabled but unavailable, deny the command
+		result.Decision = DecisionDeny
+		result.Reasons = []string{"AI scoring is enabled but unavailable"}
+		result.Context = "LLM provider error: " + err.Error()
+		addUniqueString(&result.ReasonCodes, "llm_unavailable")
+		return
+	}
+
+	// Update risk score if AI assessment is higher
+	if assessment.RiskScore > result.RiskScore {
+		result.RiskScore = assessment.RiskScore
+	}
+
+	// Add AI-detected risk categories
+	for _, cat := range assessment.RiskCategories {
+		addUniqueString(&result.RiskCategories, cat)
+	}
+
+	// Upgrade decision based on AI recommendation
+	switch assessment.RecommendedAction {
+	case "deny":
+		if assessment.Confidence >= 0.7 {
+			result.Decision = DecisionDeny
+			result.Reasons = []string{assessment.Explanation}
+			result.Context = "AI assessment: " + assessment.Explanation
+			addUniqueString(&result.ReasonCodes, "ai_blocked")
+		} else {
+			// Lower confidence - ask instead of deny
+			result.Decision = DecisionAsk
+			result.Reasons = []string{assessment.Explanation}
+			result.Context = "AI flagged (confidence: " + formatConfidence(assessment.Confidence) + "): " + assessment.Explanation
+			addUniqueString(&result.ReasonCodes, "ai_flagged")
+		}
+	case "ask":
+		if result.Decision == DecisionAllow {
+			result.Decision = DecisionAsk
+			result.Reasons = []string{assessment.Explanation}
+			result.Context = "AI review: " + assessment.Explanation
+			addUniqueString(&result.ReasonCodes, "ai_review")
+		}
+	}
+}
+
+// formatConfidence formats a confidence value as a percentage string.
+func formatConfidence(c float64) string {
+	pct := int(c * 100)
+	if pct > 100 {
+		pct = 100
+	}
+	return fmt.Sprintf("%d%%", pct)
 }
 
 // runScanners runs all enabled scanners on the input.

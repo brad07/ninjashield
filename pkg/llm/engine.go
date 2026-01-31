@@ -4,7 +4,7 @@ package llm
 import (
 	"context"
 
-	"github.com/brad07/ninjashield/pkg/ollama"
+	"github.com/brad07/ninjashield/pkg/localllm"
 	"github.com/brad07/ninjashield/pkg/policy"
 	"github.com/brad07/ninjashield/pkg/scanners"
 )
@@ -15,20 +15,20 @@ type Engine struct {
 	matcher        *policy.Matcher
 	secretsScanner *scanners.SecretsScanner
 	piiScanner     *scanners.PIIScanner
-	ollamaClient   *ollama.Client
+	llmProvider    localllm.Provider
 
 	// Configuration
 	enableSecrets bool
 	enablePII     bool
-	enableOllama  bool
+	enableLLM     bool
 }
 
 // EngineConfig holds configuration for the LLM engine.
 type EngineConfig struct {
 	EnableSecrets bool
 	EnablePII     bool
-	EnableOllama  bool
-	OllamaConfig  ollama.Config
+	EnableLLM     bool
+	LLMProvider   localllm.Provider
 }
 
 // DefaultEngineConfig returns the default engine configuration.
@@ -36,8 +36,7 @@ func DefaultEngineConfig() EngineConfig {
 	return EngineConfig{
 		EnableSecrets: true,
 		EnablePII:     true,
-		EnableOllama:  false, // Off by default
-		OllamaConfig:  ollama.DefaultConfig(),
+		EnableLLM:     false, // Off by default
 	}
 }
 
@@ -48,21 +47,22 @@ func NewEngine(pol *policy.Policy) *Engine {
 
 // NewEngineWithConfig creates a new LLM evaluation engine with custom configuration.
 func NewEngineWithConfig(pol *policy.Policy, config EngineConfig) *Engine {
-	var ollamaClient *ollama.Client
-	if config.EnableOllama {
-		ollamaClient = ollama.NewClient(config.OllamaConfig)
-	}
-
 	return &Engine{
 		policy:         pol,
 		matcher:        policy.NewMatcher(),
 		secretsScanner: scanners.NewSecretsScanner(),
 		piiScanner:     scanners.NewPIIScanner(),
-		ollamaClient:   ollamaClient,
+		llmProvider:    config.LLMProvider,
 		enableSecrets:  config.EnableSecrets,
 		enablePII:      config.EnablePII,
-		enableOllama:   config.EnableOllama,
+		enableLLM:      config.EnableLLM,
 	}
+}
+
+// SetLLMProvider sets the local LLM provider for AI-based scoring.
+func (e *Engine) SetLLMProvider(provider localllm.Provider) {
+	e.llmProvider = provider
+	e.enableLLM = provider != nil
 }
 
 // SetPolicy updates the policy used by the engine.
@@ -144,9 +144,9 @@ func (e *Engine) Evaluate(ctx context.Context, req *Request) *EvaluationResult {
 	// Process matched rules
 	e.processMatchedRules(matchedRules, result)
 
-	// Optional Ollama scoring
-	if e.enableOllama && e.ollamaClient != nil {
-		ollamaSummary := ollama.ContentSummary{
+	// Optional LLM scoring
+	if e.enableLLM && e.llmProvider != nil {
+		llmSummary := localllm.ContentSummary{
 			Provider:        string(req.Provider),
 			Model:           req.Model,
 			RequestType:     string(req.RequestType),
@@ -159,10 +159,10 @@ func (e *Engine) Evaluate(ctx context.Context, req *Request) *EvaluationResult {
 			ContentPreview:  truncateContent(content, 500),
 		}
 
-		assessment, err := e.ollamaClient.AssessRisk(ctx, ollamaSummary)
+		assessment, err := e.llmProvider.AssessContent(ctx, llmSummary)
 		if err == nil && assessment != nil {
-			// Merge Ollama assessment (advisory only)
-			e.mergeOllamaAssessment(assessment, result)
+			// Merge LLM assessment (advisory only)
+			e.mergeLLMAssessment(assessment, result)
 		}
 	}
 
@@ -254,21 +254,21 @@ func (e *Engine) processMatchedRules(matches []ruleMatch, result *EvaluationResu
 	}
 }
 
-// mergeOllamaAssessment merges Ollama assessment into the result (advisory).
-func (e *Engine) mergeOllamaAssessment(assessment *ollama.RiskAssessment, result *EvaluationResult) {
-	// Add Ollama risk categories
+// mergeLLMAssessment merges LLM assessment into the result (advisory).
+func (e *Engine) mergeLLMAssessment(assessment *localllm.RiskAssessment, result *EvaluationResult) {
+	// Add LLM risk categories
 	for _, cat := range assessment.RiskCategories {
 		addUniqueString(&result.RiskCategories, cat)
 	}
 
-	// Adjust risk score (weighted average, Ollama is advisory)
+	// Adjust risk score (weighted average, LLM is advisory)
 	if assessment.Confidence > 0.5 {
 		// Only factor in high-confidence assessments
-		ollamaWeight := 0.3 // 30% weight for Ollama
-		result.RiskScore = int(float64(result.RiskScore)*(1-ollamaWeight) + float64(assessment.RiskScore)*ollamaWeight)
+		llmWeight := 0.3 // 30% weight for LLM
+		result.RiskScore = int(float64(result.RiskScore)*(1-llmWeight) + float64(assessment.RiskScore)*llmWeight)
 	}
 
-	// Add Ollama explanation to context
+	// Add LLM explanation to context
 	if assessment.Explanation != "" && result.Context != "" {
 		result.Context += ". AI analysis: " + assessment.Explanation
 	} else if assessment.Explanation != "" {
@@ -349,12 +349,12 @@ func getMaskForType(category string) string {
 	}
 }
 
-// QuickEvaluate performs evaluation without Ollama (for low-latency scenarios).
+// QuickEvaluate performs evaluation without LLM scoring (for low-latency scenarios).
 func (e *Engine) QuickEvaluate(req *Request) *EvaluationResult {
-	// Temporarily disable Ollama
-	origOllama := e.enableOllama
-	e.enableOllama = false
-	defer func() { e.enableOllama = origOllama }()
+	// Temporarily disable LLM
+	origLLM := e.enableLLM
+	e.enableLLM = false
+	defer func() { e.enableLLM = origLLM }()
 
 	return e.Evaluate(context.Background(), req)
 }

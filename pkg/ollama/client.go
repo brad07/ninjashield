@@ -317,6 +317,142 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// CommandSummary provides context for command risk assessment.
+type CommandSummary struct {
+	Command        string   `json:"command"`
+	Cwd            string   `json:"cwd"`
+	User           string   `json:"user"`
+	Tool           string   `json:"tool"`
+	DetectedRisks  []string `json:"detected_risks"`
+	InitialScore   int      `json:"initial_score"`
+}
+
+// AssessCommand performs AI-based risk assessment on a shell command.
+func (c *Client) AssessCommand(ctx context.Context, summary CommandSummary) (*RiskAssessment, error) {
+	if c.config.Mode == ModeOff {
+		return &RiskAssessment{
+			RiskScore:         summary.InitialScore,
+			RecommendedAction: "allow",
+			Explanation:       "Ollama scoring disabled",
+			Confidence:        0,
+		}, nil
+	}
+
+	prompt := c.buildCommandPrompt(summary)
+
+	response, err := c.generate(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("ollama generate failed: %w", err)
+	}
+
+	assessment, err := c.parseResponse(response)
+	if err != nil {
+		// Return a cautious assessment on parse error
+		return &RiskAssessment{
+			RiskScore:         60,
+			RecommendedAction: "ask",
+			Explanation:       "Could not parse Ollama response - defaulting to caution",
+			Confidence:        0.3,
+		}, nil
+	}
+
+	return assessment, nil
+}
+
+// buildCommandPrompt creates the prompt for command risk assessment.
+func (c *Client) buildCommandPrompt(summary CommandSummary) string {
+	var prompt string
+
+	if c.config.Mode == ModeFast {
+		prompt = fmt.Sprintf(`Analyze this shell command for security risks. Respond with JSON only.
+
+Command: %s
+Working Directory: %s
+User: %s
+Tool: %s
+Pre-detected Risks: %v
+Initial Risk Score: %d
+
+Evaluate for:
+- Data exfiltration (curl/wget posting sensitive files)
+- Reverse shells (bash -i, nc, /dev/tcp)
+- Credential theft (reading .ssh, .aws, .env files)
+- System damage (rm -rf, chmod 777 on system files)
+- Privilege escalation (sudo abuse, setuid)
+- Network attacks (port scanning, DNS exfiltration)
+
+Respond with this exact JSON format:
+{"risk_score": 0-100, "risk_categories": ["category1"], "recommended_action": "allow|deny|ask", "explanation": "brief reason", "confidence": 0.0-1.0}`,
+			summary.Command,
+			summary.Cwd,
+			summary.User,
+			summary.Tool,
+			summary.DetectedRisks,
+			summary.InitialScore,
+		)
+	} else {
+		// Strict mode - more detailed analysis
+		prompt = fmt.Sprintf(`You are a security analyst reviewing a shell command executed by an AI coding assistant. Perform a thorough risk assessment.
+
+Command: %s
+Working Directory: %s
+User: %s
+Tool: %s
+Pre-detected Risks: %v
+Initial Risk Score: %d
+
+Analyze for these threat categories:
+
+1. DATA EXFILTRATION
+   - curl/wget POSTing files to external servers
+   - base64 encoding + network transfer
+   - DNS exfiltration patterns
+   - Sending sensitive files (.env, .ssh, credentials)
+
+2. REVERSE SHELLS & BACKDOORS
+   - bash -i >& /dev/tcp patterns
+   - nc/netcat listeners
+   - python/perl/ruby one-liners
+   - socat connections
+
+3. CREDENTIAL THEFT
+   - Reading SSH keys, AWS credentials
+   - Accessing password files
+   - Browser credential stores
+   - Environment variable dumping with secrets
+
+4. SYSTEM DAMAGE
+   - Recursive deletion of important paths
+   - chmod 777 on system files
+   - Filling disk space
+   - Fork bombs
+
+5. PRIVILEGE ESCALATION
+   - Unnecessary sudo usage
+   - setuid manipulation
+   - /etc/passwd or /etc/shadow access
+
+6. RECONNAISSANCE
+   - Port scanning
+   - Network enumeration
+   - System information gathering for attacks
+
+Consider the CONTEXT - some commands are dangerous in general but safe in specific directories (e.g., rm -rf in a temp build folder is different from rm -rf /).
+
+Respond with this exact JSON format only, no other text:
+{"risk_score": 0-100, "risk_categories": ["list", "of", "categories"], "recommended_action": "allow|deny|ask", "explanation": "detailed explanation", "confidence": 0.0-1.0}`,
+			summary.Command,
+			summary.Cwd,
+			summary.User,
+			summary.Tool,
+			summary.DetectedRisks,
+			summary.InitialScore,
+		)
+	}
+
+	return prompt
+}
+
 // SanitizeContent removes detected secrets from content for safe logging/analysis.
 func SanitizeContent(content string, secretPatterns []string) string {
 	result := content

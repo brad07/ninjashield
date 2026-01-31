@@ -34,8 +34,8 @@ type Config struct {
 	// Logging settings
 	Logging LoggingConfig `yaml:"logging"`
 
-	// Ollama settings (optional)
-	Ollama OllamaConfig `yaml:"ollama"`
+	// Local LLM settings (optional)
+	LLM LLMConfig `yaml:"llm"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -65,9 +65,10 @@ type LoggingConfig struct {
 	MaxAgeDays    int    `yaml:"max_age_days"`
 }
 
-// OllamaConfig holds optional Ollama integration settings.
-type OllamaConfig struct {
+// LLMConfig holds optional local LLM integration settings.
+type LLMConfig struct {
 	Enabled  bool   `yaml:"enabled"`
+	Provider string `yaml:"provider"` // "ollama", "lmstudio", etc.
 	Endpoint string `yaml:"endpoint"`
 	Model    string `yaml:"model"`
 	Mode     string `yaml:"mode"` // "fast" or "strict"
@@ -93,10 +94,11 @@ func DefaultConfig() *Config {
 			MaxSizeMB:  100,
 			MaxAgeDays: 90,
 		},
-		Ollama: OllamaConfig{
+		LLM: LLMConfig{
 			Enabled:  false,
+			Provider: "ollama",
 			Endpoint: "http://localhost:11434",
-			Model:    "llama3.2",
+			Model:    "gemma3",
 			Mode:     "fast",
 		},
 	}
@@ -246,16 +248,24 @@ func (c *Config) Validate() error {
 		errs = append(errs, "logging max_age_days must be at least 1")
 	}
 
-	// Validate Ollama config if enabled
-	if c.Ollama.Enabled {
-		if c.Ollama.Endpoint == "" {
-			errs = append(errs, "ollama endpoint is required when enabled")
+	// Validate LLM config if enabled
+	if c.LLM.Enabled {
+		validProviders := map[string]bool{
+			"ollama":   true,
+			"lmstudio": true,
+			"localai":  true,
 		}
-		if c.Ollama.Model == "" {
-			errs = append(errs, "ollama model is required when enabled")
+		if !validProviders[c.LLM.Provider] {
+			errs = append(errs, fmt.Sprintf("invalid llm provider: %s (must be ollama, lmstudio, or localai)", c.LLM.Provider))
 		}
-		if c.Ollama.Mode != "fast" && c.Ollama.Mode != "strict" {
-			errs = append(errs, fmt.Sprintf("invalid ollama mode: %s (must be fast or strict)", c.Ollama.Mode))
+		if c.LLM.Endpoint == "" {
+			errs = append(errs, "llm endpoint is required when enabled")
+		}
+		if c.LLM.Model == "" {
+			errs = append(errs, "llm model is required when enabled")
+		}
+		if c.LLM.Mode != "fast" && c.LLM.Mode != "strict" {
+			errs = append(errs, fmt.Sprintf("invalid llm mode: %s (must be fast or strict)", c.LLM.Mode))
 		}
 	}
 

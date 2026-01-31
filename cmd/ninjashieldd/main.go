@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/brad07/ninjashield/pkg/config"
 	"github.com/brad07/ninjashield/pkg/llm"
-	"github.com/brad07/ninjashield/pkg/ollama"
+	"github.com/brad07/ninjashield/pkg/localllm"
+	_ "github.com/brad07/ninjashield/pkg/localllm" // Register providers
 	"github.com/brad07/ninjashield/pkg/policy"
 	"github.com/brad07/ninjashield/pkg/policy/packs"
 	"github.com/brad07/ninjashield/pkg/server"
@@ -25,9 +28,13 @@ func main() {
 	port := flag.Int("port", 7575, "Port to listen on")
 	packName := flag.String("pack", "balanced", "Policy pack to use (conservative, balanced, developer-friendly)")
 	configPath := flag.String("config", "", "Path to configuration file")
-	enableOllama := flag.Bool("ollama", false, "Enable Ollama-based risk scoring")
-	ollamaEndpoint := flag.String("ollama-endpoint", "http://localhost:11434", "Ollama API endpoint")
-	ollamaModel := flag.String("ollama-model", "gemma3", "Ollama model to use for risk assessment")
+
+	// Local LLM provider flags
+	llmProvider := flag.String("llm", "", "Local LLM provider (ollama, lmstudio) - enables AI-based command scoring")
+	llmEndpoint := flag.String("llm-endpoint", "", "LLM API endpoint (auto-detected if not specified)")
+	llmModel := flag.String("llm-model", "", "LLM model to use (provider default if not specified)")
+	llmMode := flag.String("llm-mode", "fast", "LLM scoring mode (fast, strict)")
+
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -75,20 +82,53 @@ func main() {
 	// Initialize policy engine (for command evaluation)
 	engine := policy.NewEngine(pol)
 
+	// Initialize local LLM provider if configured
+	var localProvider localllm.Provider
+	if *llmProvider != "" {
+		providerType := localllm.ProviderType(*llmProvider)
+		providerConfig := localllm.DefaultConfig(providerType)
+
+		if *llmEndpoint != "" {
+			providerConfig.Endpoint = *llmEndpoint
+		}
+		if *llmModel != "" {
+			providerConfig.Model = *llmModel
+		}
+		if *llmMode == "strict" {
+			providerConfig.Mode = localllm.ModeStrict
+		} else {
+			providerConfig.Mode = localllm.ModeFast
+		}
+
+		var err error
+		localProvider, err = localllm.NewProvider(providerConfig)
+		if err != nil {
+			log.Printf("Warning: Failed to create LLM provider %q: %v", *llmProvider, err)
+		} else {
+			// Check if provider is available
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if localProvider.IsAvailable(ctx) {
+				log.Printf("Local LLM provider: %s (model: %s, mode: %s)", localProvider.Name(), providerConfig.Model, providerConfig.Mode)
+				// Set on policy engine for command scoring
+				engine.SetLLMProvider(localProvider)
+			} else {
+				log.Printf("Warning: LLM provider %q not available at %s", *llmProvider, providerConfig.Endpoint)
+				localProvider = nil
+			}
+			cancel()
+		}
+	}
+
 	// Initialize LLM engine (for LLM request evaluation)
 	llmPolicy := llm.CreateLLMPolicy()
 	llmEngineConfig := llm.EngineConfig{
 		EnableSecrets: true,
 		EnablePII:     true,
-		EnableOllama:  *enableOllama,
-		OllamaConfig: ollama.Config{
-			Endpoint: *ollamaEndpoint,
-			Model:    *ollamaModel,
-			Mode:     ollama.ModeFast,
-		},
+		EnableLLM:     localProvider != nil,
+		LLMProvider:   localProvider,
 	}
 	llmEngine := llm.NewEngineWithConfig(llmPolicy, llmEngineConfig)
-	log.Printf("LLM engine initialized (Ollama: %v)", *enableOllama)
+	log.Printf("LLM engine initialized (AI scoring: %v)", localProvider != nil)
 
 	// Initialize storage
 	store := storage.NewMemoryStore()

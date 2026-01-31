@@ -26,7 +26,7 @@ func TestEngine_NewEngineWithConfig(t *testing.T) {
 	config := llm.EngineConfig{
 		EnableSecrets: true,
 		EnablePII:     false,
-		EnableOllama:  false,
+		EnableLLM:  false,
 	}
 	engine := llm.NewEngineWithConfig(pol, config)
 
@@ -204,7 +204,7 @@ func TestEngine_QuickEvaluate(t *testing.T) {
 	config := llm.EngineConfig{
 		EnableSecrets: true,
 		EnablePII:     true,
-		EnableOllama:  true, // This would normally use Ollama
+		EnableLLM:  true, // This would normally use local LLM
 	}
 	engine := llm.NewEngineWithConfig(pol, config)
 
@@ -217,7 +217,7 @@ func TestEngine_QuickEvaluate(t *testing.T) {
 		},
 	}
 
-	// QuickEvaluate should skip Ollama
+	// QuickEvaluate should skip LLM scoring
 	result := engine.QuickEvaluate(req)
 
 	if result == nil {

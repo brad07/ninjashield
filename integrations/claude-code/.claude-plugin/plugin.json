@@ -1,0 +1,12 @@
+{
+  "name": "ninjashield",
+  "description": "Security gateway for Claude Code - evaluates commands against policies before execution",
+  "version": "0.1.0",
+  "author": {
+    "name": "NinjaShield"
+  },
+  "homepage": "https://github.com/brad07/ninjashield",
+  "repository": "https://github.com/brad07/ninjashield",
+  "license": "MIT",
+  "keywords": ["security", "policy", "commands", "protection"]
+}
