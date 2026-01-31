@@ -27,7 +27,7 @@ func main() {
 	configPath := flag.String("config", "", "Path to configuration file")
 	enableOllama := flag.Bool("ollama", false, "Enable Ollama-based risk scoring")
 	ollamaEndpoint := flag.String("ollama-endpoint", "http://localhost:11434", "Ollama API endpoint")
-	ollamaModel := flag.String("ollama-model", "llama3.2", "Ollama model to use for risk assessment")
+	ollamaModel := flag.String("ollama-model", "gemma3", "Ollama model to use for risk assessment")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 

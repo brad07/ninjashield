@@ -33,7 +33,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Endpoint: "http://localhost:11434",
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ModeFast,
 		Timeout:  30 * time.Second,
 	}

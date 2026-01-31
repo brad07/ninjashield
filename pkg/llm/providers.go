@@ -179,7 +179,7 @@ func (p *Parser) parseOpenAIRequest(endpoint string, body []byte) (*Request, err
 
 	// Parse messages
 	for _, msg := range raw.Messages {
-		content := extractContent(msg.Content)
+		content, attachments := extractContentAndAttachments(msg.Content)
 
 		m := Message{
 			Role:       Role(msg.Role),
@@ -187,6 +187,9 @@ func (p *Parser) parseOpenAIRequest(endpoint string, body []byte) (*Request, err
 			Name:       msg.Name,
 			ToolCallID: msg.ToolCallID,
 		}
+
+		// Add attachments from this message
+		req.Attachments = append(req.Attachments, attachments...)
 
 		// Parse tool calls
 		for _, tc := range msg.ToolCalls {
@@ -426,23 +429,89 @@ func (p *Parser) parseGenericRequest(endpoint string, body []byte) (*Request, er
 // Helper functions
 
 func extractContent(v interface{}) string {
+	content, _ := extractContentAndAttachments(v)
+	return content
+}
+
+// extractContentAndAttachments extracts text content and attachments from message content.
+// Handles OpenAI's vision API format where content can be an array of parts.
+func extractContentAndAttachments(v interface{}) (string, []Attachment) {
+	var attachments []Attachment
+
 	switch c := v.(type) {
 	case string:
-		return c
+		return c, nil
 	case []interface{}:
-		// Handle content parts array
+		// Handle content parts array (OpenAI vision format)
 		var texts []string
 		for _, part := range c {
 			if p, ok := part.(map[string]interface{}); ok {
-				if text, ok := p["text"].(string); ok {
-					texts = append(texts, text)
+				partType, _ := p["type"].(string)
+
+				switch partType {
+				case "text":
+					if text, ok := p["text"].(string); ok {
+						texts = append(texts, text)
+					}
+				case "image_url":
+					// Extract image URL attachment (OpenAI vision format)
+					if imageURL, ok := p["image_url"].(map[string]interface{}); ok {
+						url, _ := imageURL["url"].(string)
+						attachments = append(attachments, Attachment{
+							Type:     "image",
+							MimeType: detectMimeTypeFromURL(url),
+							URL:      url,
+						})
+					}
+				case "image":
+					// Alternative image format (Anthropic style)
+					if source, ok := p["source"].(map[string]interface{}); ok {
+						mediaType, _ := source["media_type"].(string)
+						attachments = append(attachments, Attachment{
+							Type:     "image",
+							MimeType: mediaType,
+						})
+					}
+				case "file", "document":
+					// File attachment
+					url, _ := p["url"].(string)
+					name, _ := p["name"].(string)
+					attachments = append(attachments, Attachment{
+						Type:     "file",
+						MimeType: detectMimeTypeFromURL(url),
+						URL:      url,
+						Name:     name,
+					})
 				}
 			}
 		}
-		return strings.Join(texts, "\n")
+		return strings.Join(texts, "\n"), attachments
 	default:
-		return ""
+		return "", nil
 	}
+}
+
+// detectMimeTypeFromURL attempts to detect MIME type from a URL's extension.
+func detectMimeTypeFromURL(url string) string {
+	url = strings.ToLower(url)
+	switch {
+	case strings.HasSuffix(url, ".png"):
+		return "image/png"
+	case strings.HasSuffix(url, ".jpg"), strings.HasSuffix(url, ".jpeg"):
+		return "image/jpeg"
+	case strings.HasSuffix(url, ".gif"):
+		return "image/gif"
+	case strings.HasSuffix(url, ".webp"):
+		return "image/webp"
+	case strings.HasSuffix(url, ".pdf"):
+		return "application/pdf"
+	case strings.Contains(url, "data:image/"):
+		// Base64 data URL
+		if idx := strings.Index(url, ";"); idx > 5 {
+			return url[5:idx]
+		}
+	}
+	return "application/octet-stream"
 }
 
 func extractStringSlice(v interface{}) []string {

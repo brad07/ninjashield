@@ -14,7 +14,7 @@ import (
 func TestClient_NewClient(t *testing.T) {
 	config := ollama.Config{
 		Endpoint: "http://localhost:11434",
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  30 * time.Second,
 	}
@@ -46,7 +46,7 @@ func TestClient_DefaultConfig(t *testing.T) {
 		t.Errorf("Unexpected default endpoint: %s", config.Endpoint)
 	}
 
-	if config.Model != "llama3.2" {
+	if config.Model != "gemma3" {
 		t.Errorf("Unexpected default model: %s", config.Model)
 	}
 
@@ -113,7 +113,7 @@ func TestClient_AssessRisk_MockServer(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  5 * time.Second,
 	}
@@ -161,7 +161,7 @@ func TestClient_AssessRisk_InvalidResponse(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  5 * time.Second,
 	}
@@ -196,7 +196,7 @@ func TestClient_AssessRisk_ServerError(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  5 * time.Second,
 	}
@@ -295,7 +295,7 @@ func TestClient_StrictMode(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeStrict,
 		Timeout:  5 * time.Second,
 	}
@@ -337,7 +337,7 @@ func TestClient_RiskScoreClamping(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  5 * time.Second,
 	}
@@ -374,7 +374,7 @@ func TestClient_InvalidRecommendedAction(t *testing.T) {
 
 	config := ollama.Config{
 		Endpoint: server.URL,
-		Model:    "llama3.2",
+		Model:    "gemma3",
 		Mode:     ollama.ModeFast,
 		Timeout:  5 * time.Second,
 	}
