@@ -14,6 +14,7 @@ import (
 
 	"github.com/brad07/ninjashield/pkg/api"
 	"github.com/brad07/ninjashield/pkg/llm"
+	"github.com/brad07/ninjashield/pkg/plugin"
 	"github.com/brad07/ninjashield/pkg/policy"
 	"github.com/brad07/ninjashield/pkg/storage"
 )
@@ -40,13 +41,14 @@ func DefaultConfig() Config {
 
 // Server represents the NinjaShield HTTP server.
 type Server struct {
-	config     Config
-	httpServer *http.Server
-	engine     *policy.Engine
-	llmEngine  *llm.Engine
-	store      storage.Store
-	startTime  time.Time
-	listener   net.Listener
+	config        Config
+	httpServer    *http.Server
+	engine        *policy.Engine
+	llmEngine     *llm.Engine
+	pluginManager *plugin.Manager
+	store         storage.Store
+	startTime     time.Time
+	listener      net.Listener
 
 	mu      sync.RWMutex
 	running bool
@@ -160,6 +162,18 @@ func (s *Server) SetLLMEngine(engine *llm.Engine) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.llmEngine = engine
+}
+
+// GetPluginManager returns the plugin manager.
+func (s *Server) GetPluginManager() *plugin.Manager {
+	return s.pluginManager
+}
+
+// SetPluginManager sets the plugin manager.
+func (s *Server) SetPluginManager(manager *plugin.Manager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pluginManager = manager
 }
 
 // registerRoutes registers all API routes.

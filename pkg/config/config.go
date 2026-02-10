@@ -36,6 +36,12 @@ type Config struct {
 
 	// Local LLM settings (optional)
 	LLM LLMConfig `yaml:"llm"`
+
+	// Plugin settings
+	Plugins PluginsConfig `yaml:"plugins"`
+
+	// Pipeline settings
+	Pipeline PipelineConfig `yaml:"pipeline"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -74,6 +80,70 @@ type LLMConfig struct {
 	Mode     string `yaml:"mode"` // "fast" or "strict"
 }
 
+// PluginsConfig holds plugin system settings.
+type PluginsConfig struct {
+	// Dir is the directory for external plugins.
+	Dir string `yaml:"dir"`
+
+	// HotReload enables automatic plugin reloading on config changes.
+	HotReload bool `yaml:"hot_reload"`
+
+	// LLMProviders contains configuration for each LLM provider plugin.
+	LLMProviders map[string]LLMProviderConfig `yaml:"llm_providers"`
+
+	// Scanners contains configuration for each scanner plugin.
+	Scanners map[string]ScannerPluginConfig `yaml:"scanners"`
+}
+
+// LLMProviderConfig holds configuration for an individual LLM provider.
+type LLMProviderConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Endpoint string `yaml:"endpoint,omitempty"`
+	Model    string `yaml:"model,omitempty"`
+	Mode     string `yaml:"mode,omitempty"`
+	APIKey   string `yaml:"api_key,omitempty"`
+}
+
+// ScannerPluginConfig holds configuration for an individual scanner plugin.
+type ScannerPluginConfig struct {
+	Enabled  bool           `yaml:"enabled"`
+	Priority int            `yaml:"priority,omitempty"`
+	Config   map[string]any `yaml:"config,omitempty"`
+}
+
+// PipelineConfig holds pipeline evaluation settings.
+type PipelineConfig struct {
+	// ParallelScanners enables parallel scanner execution.
+	ParallelScanners bool `yaml:"parallel_scanners"`
+
+	// ScannerTimeout is the maximum time for scanner execution in seconds.
+	ScannerTimeoutSec int `yaml:"scanner_timeout_sec"`
+
+	// LLMTimeout is the maximum time for LLM assessment in seconds.
+	LLMTimeoutSec int `yaml:"llm_timeout_sec"`
+
+	// FailOpen determines behavior when plugins fail.
+	FailOpen bool `yaml:"fail_open"`
+
+	// DefaultRiskTolerance is the default risk tolerance level (strict, balanced, permissive).
+	DefaultRiskTolerance string `yaml:"default_risk_tolerance"`
+
+	// AIScoring configures AI scoring behavior.
+	AIScoring AIScoringConfig `yaml:"ai_scoring"`
+}
+
+// AIScoringConfig configures AI scoring behavior.
+type AIScoringConfig struct {
+	// Enabled determines if AI scoring is active.
+	Enabled bool `yaml:"enabled"`
+
+	// UpgradeOnly means AI can escalate but not downgrade risk.
+	UpgradeOnly bool `yaml:"upgrade_only"`
+
+	// MinConfidence is the minimum confidence for AI to influence decisions.
+	MinConfidence float64 `yaml:"min_confidence"`
+}
+
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return &Config{
@@ -100,6 +170,50 @@ func DefaultConfig() *Config {
 			Endpoint: "http://localhost:11434",
 			Model:    "gemma3",
 			Mode:     "fast",
+		},
+		Plugins: PluginsConfig{
+			Dir:       filepath.Join("~", DefaultConfigDir, "plugins"),
+			HotReload: true,
+			LLMProviders: map[string]LLMProviderConfig{
+				"ollama": {
+					Enabled:  true,
+					Endpoint: "http://localhost:11434",
+					Model:    "gemma3",
+					Mode:     "fast",
+				},
+				"lmstudio": {
+					Enabled:  false,
+					Endpoint: "http://localhost:1234",
+					Model:    "local-model",
+					Mode:     "fast",
+				},
+			},
+			Scanners: map[string]ScannerPluginConfig{
+				"secrets": {
+					Enabled:  true,
+					Priority: 100,
+				},
+				"pii": {
+					Enabled:  true,
+					Priority: 90,
+				},
+				"commands": {
+					Enabled:  true,
+					Priority: 95,
+				},
+			},
+		},
+		Pipeline: PipelineConfig{
+			ParallelScanners:     true,
+			ScannerTimeoutSec:    5,
+			LLMTimeoutSec:        30,
+			FailOpen:             false,
+			DefaultRiskTolerance: "balanced",
+			AIScoring: AIScoringConfig{
+				Enabled:       true,
+				UpgradeOnly:   true,
+				MinConfidence: 0.7,
+			},
 		},
 	}
 }
